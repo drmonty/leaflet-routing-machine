@@ -1,0 +1,19 @@
+{
+    "name": "drmonty-leaflet-routing-machine",
+    "repo": "drmonty/leaflet-routing-machine",
+    "description": "Routing for Leaflet",
+    "version": "2.1.1",
+    "homepage": "http://github.com/perliedman/leaflet-routing-machine",
+    "license": "MIT",
+    "main": "js/leaflet-routing-machine.js",
+    "scripts": [
+        "js/leaflet-routing-machine.js"
+    ],
+    "files": [
+        "js/leaflet-routing-machine.js",
+        "js/leaflet-routing-machine.min.js",
+        "css/leaflet-routing-machine.css",
+        "css/leaflet.routing.icons.png",
+        "css/leaflet.routing.icons.svg"
+    ]
+}
