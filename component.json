@@ -12,6 +12,8 @@
     "files": [
         "js/leaflet-routing-machine.js",
         "js/leaflet-routing-machine.min.js",
+        "js/L.Routing.GraphHopper.js",
+        "js/L.Routing.Mapbox.js",
         "css/leaflet-routing-machine.css",
         "css/leaflet.routing.icons.png",
         "css/leaflet.routing.icons.svg"
