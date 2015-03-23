@@ -21,6 +21,7 @@
                 "js/lrm-graphhopper.js",
                 "js/lrm-mapbox.js",
                 "css/leaflet-routing-machine.css",
+                "css/routing-icon.png",
                 "css/leaflet.routing.icons.png"
             ]
         }

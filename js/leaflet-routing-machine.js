@@ -787,9 +787,9 @@ if (typeof module !== undefined) module.exports = polyline;
 			case 'Left':
 				return 'turn-left';
 			case 'SlightLeft':
-				return 'slight-left';
+				return 'bear-left';
 			case 'WaypointReached':
-				return 'arrive';
+				return 'via';
 			case 'Roundabout':
 				return 'enter-roundabout';
 			case 'DestinationReached':
@@ -838,7 +838,8 @@ if (typeof module !== undefined) module.exports = polyline;
 			alternativeClassName: '',
 			minimizedClassName: '',
 			itineraryClassName: '',
-			show: true
+			show: true,
+			collapsible: undefined
 		},
 
 		initialize: function(options) {
@@ -849,9 +850,15 @@ if (typeof module !== undefined) module.exports = polyline;
 			});
 		},
 
-		onAdd: function() {
+		onAdd: function(map) {
+			var collapsible = this.options.collapsible,
+				collapseBtn;
+
+			collapsible = collapsible || (collapsible === undefined && map.getSize().x <= 640);
+
 			this._container = L.DomUtil.create('div', 'leaflet-routing-container leaflet-bar ' +
-				(!this.options.show ? 'leaflet-routing-container-hide' : '') +
+				(!this.options.show ? 'leaflet-routing-container-hide ' : '') +
+				(collapsible ? 'leaflet-routing-collapsible ' : '') +
 				this.options.containerClassName);
 			this._altContainer = this.createAlternativesContainer();
 			this._container.appendChild(this._altContainer);
@@ -859,6 +866,13 @@ if (typeof module !== undefined) module.exports = polyline;
 			L.DomEvent.addListener(this._container, 'mousewheel', function(e) {
 				L.DomEvent.stopPropagation(e);
 			});
+
+			if (collapsible) {
+				collapseBtn = L.DomUtil.create('span', 'leaflet-routing-collapse-btn');
+				L.DomEvent.on(collapseBtn, 'click', this._toggle, this);
+				this._container.insertBefore(collapseBtn, this._container.firstChild);
+			}
+
 			return this._container;
 		},
 
@@ -896,6 +910,11 @@ if (typeof module !== undefined) module.exports = polyline;
 
 		hide: function() {
 			L.DomUtil.addClass(this._container, 'leaflet-routing-container-hide');
+		},
+
+		_toggle: function() {
+			var collapsed = L.DomUtil.hasClass(this._container, 'leaflet-routing-container-hide');
+			this[collapsed ? 'show' : 'hide']();
 		},
 
 		_createAlternative: function(alt, i) {
@@ -1628,13 +1647,15 @@ if (typeof module !== undefined) module.exports = polyline;
 
 		buildRouteUrl: function(waypoints, options) {
 			var locs = [],
+				wp,
 			    computeInstructions,
 			    computeAlternative,
 			    locationKey,
 			    hint;
 
 			for (var i = 0; i < waypoints.length; i++) {
-				locationKey = this._locationKey(waypoints[i].latLng);
+				wp = waypoints[i];
+				locationKey = this._locationKey(wp.latLng);
 				locs.push('loc=' + locationKey);
 
 				hint = this._hints.locations[locationKey];
@@ -1642,8 +1663,7 @@ if (typeof module !== undefined) module.exports = polyline;
 					locs.push('hint=' + hint);
 				}
 
-				if (waypoints[i].options.allowUTurn)
-				{
+				if (wp.options && wp.options.allowUTurn) {
 					locs.push('u=true');
 				}
 			}
@@ -1829,7 +1849,9 @@ if (typeof module !== undefined) module.exports = polyline;
 				{color: 'red', opacity: 1, weight: 2, dashArray: '7,12'}
 			],
 			draggableWaypoints: true,
+			routeWhileDragging: false,
 			addWaypoints: true,
+			reverseWaypoints: false,
 			addButtonClassName: '',
 			maxGeocoderTolerance: 200,
 			autocompleteOptions: {},
@@ -1946,30 +1968,31 @@ if (typeof module !== undefined) module.exports = polyline;
 		createGeocoders: function() {
 			var container = L.DomUtil.create('div', 'leaflet-routing-geocoders ' + this.options.geocodersClassName),
 				waypoints = this._waypoints,
-			    i,
-			    geocoderElem,
-			    addWpBtn;
+			    addWpBtn,
+			    reverseBtn;
 
 			this._geocoderContainer = container;
 			this._geocoderElems = [];
 
-			for (i = 0; i < waypoints.length; i++) {
-				geocoderElem = this._createGeocoder(i);
-				container.appendChild(geocoderElem.container);
-				this._geocoderElems.push(geocoderElem);
-			}
 
-			addWpBtn = L.DomUtil.create('button', this.options.addButtonClassName, container);
-			addWpBtn.setAttribute('type', 'button');
-			addWpBtn.innerHTML = '+';
 			if (this.options.addWaypoints) {
+				addWpBtn = L.DomUtil.create('button', 'leaflet-routing-add-waypoint ' + this.options.addButtonClassName, container);
+				addWpBtn.setAttribute('type', 'button');
 				L.DomEvent.addListener(addWpBtn, 'click', function() {
 					this.spliceWaypoints(waypoints.length, 0, null);
 				}, this);
-			} else {
-				addWpBtn.style.display = 'none';
 			}
 
+			if (this.options.reverseWaypoints) {
+				reverseBtn = L.DomUtil.create('button', 'leaflet-routing-reverse-waypoints', container);
+				reverseBtn.setAttribute('type', 'button');
+				L.DomEvent.addListener(reverseBtn, 'click', function() {
+					this._waypoints.reverse();
+					this.setWaypoints(this._waypoints);
+				}, this);
+			}
+
+			this._updateGeocoders();
 			this.on('waypointsspliced', this._updateGeocoders);
 
 			return container;
@@ -2021,39 +2044,22 @@ if (typeof module !== undefined) module.exports = polyline;
 			return g;
 		},
 
-		_updateGeocoders: function(e) {
-			var newElems = [],
-			    i,
-			    geocoderElem,
-			    beforeElem;
+		_updateGeocoders: function() {
+			var elems = [],
+				i,
+			    geocoderElem;
 
-			// Determine where to insert geocoders for new waypoints
-			if (e.index >= this._geocoderElems.length) {
-				// lastChild is the "add new wp" button
-				beforeElem = this._geocoderContainer.lastChild;
-			} else {
-				beforeElem = this._geocoderElems[e.index].container;
-			}
-
-			// Insert new geocoders for new waypoints
-			for (i = 0; i < e.added.length; i++) {
-				geocoderElem = this._createGeocoder(e.index + i);
-				this._geocoderContainer.insertBefore(geocoderElem.container, beforeElem);
-				newElems.push(geocoderElem);
-			}
-			//newElems.reverse();
-
-			for (i = e.index; i < e.index + e.nRemoved; i++) {
+			for (i = 0; i < this._geocoderElems.length; i++) {
 				this._geocoderContainer.removeChild(this._geocoderElems[i].container);
 			}
 
-			newElems.splice(0, 0, e.index, e.nRemoved);
-			[].splice.apply(this._geocoderElems, newElems);
-
-			for (i = 0; i < this._geocoderElems.length; i++) {
-				this._geocoderElems[i].input.placeholder = this.options.geocoderPlaceholder(i, this._waypoints.length);
-				this._geocoderElems[i].input.className = this.options.geocoderClass(i, this._waypoints.length);
+			for (i = this._waypoints.length - 1; i >= 0; i--) {
+				geocoderElem = this._createGeocoder(i);
+				this._geocoderContainer.insertBefore(geocoderElem.container, this._geocoderContainer.firstChild);
+				elems.push(geocoderElem);
 			}
+
+			this._geocoderElems = elems.reverse();
 		},
 
 		_updateGeocoder: function(i, geocoderElem) {
@@ -2140,65 +2146,99 @@ if (typeof module !== undefined) module.exports = polyline;
 			}
 		},
 
-		_hookWaypointEvents: function(m, i) {
-			m.on('dragstart', function(e) {
-				this.fire('waypointdragstart', this._createWaypointEvent(i, e));
-			}, this);
-			m.on('drag', function(e) {
-				this._waypoints[i].latLng = e.target.getLatLng();
-				this.fire('waypointdrag', this._createWaypointEvent(i, e));
-			}, this);
-			m.on('dragend', function(e) {
-				this._waypoints[i].latLng = e.target.getLatLng();
-				this._waypoints[i].name = '';
-				this._updateWaypointName(i, this._geocoderElems && this._geocoderElems[i].input, true);
-				this.fire('waypointdragend', this._createWaypointEvent(i, e));
-				this._fireChanged();
-			}, this);
-		},
+		_hookWaypointEvents: function(m, i, trackMouseMove) {
+			var eventLatLng = function(e) {
+					return trackMouseMove ? e.latlng : e.target.getLatLng();
+				},
+				dragStart = L.bind(function(e) {
+					this.fire('waypointdragstart', {index: i, latlng: eventLatLng(e)});
+				}, this),
+				drag = L.bind(function(e) {
+					this._waypoints[i].latLng = eventLatLng(e);
+					this.fire('waypointdrag', {index: i, latlng: eventLatLng(e)});
+				}, this),
+				dragEnd = L.bind(function(e) {
+					this._waypoints[i].latLng = eventLatLng(e);
+					this._waypoints[i].name = '';
+					this._updateWaypointName(i, this._geocoderElems && this._geocoderElems[i].input, true);
+					this.fire('waypointdragend', {index: i, latlng: eventLatLng(e)});
+					this._fireChanged();
+				}, this),
+				mouseMove,
+				mouseUp;
 
-		_createWaypointEvent: function(i, e) {
-			return {index: i, latlng: e.target.getLatLng()};
+			if (trackMouseMove) {
+				mouseMove = L.bind(function(e) {
+					this._markers[i].setLatLng(e.latlng);
+					drag(e);
+				}, this);
+				mouseUp = L.bind(function(e) {
+					this._map.dragging.enable();
+					this._map.off('mouseup', mouseUp);
+					this._map.off('mousemove', mouseMove);
+					dragEnd(e);
+				}, this);
+				this._map.dragging.disable();
+				this._map.on('mousemove', mouseMove);
+				this._map.on('mouseup', mouseUp);
+				dragStart({latlng: this._waypoints[i].latLng});
+			} else {
+				m.on('dragstart', dragStart);
+				m.on('drag', drag);
+				m.on('dragend', dragEnd);
+			}
 		},
 
 		dragNewWaypoint: function(e) {
-			var i;
-			this._newWp = {
-				afterIndex: e.afterIndex,
-				marker: L.marker(e.latlng).addTo(this._map),
-				lines: []
-			};
+			var newWpIndex = e.afterIndex + 1;
+			if (this.options.routeWhileDragging) {
+				this.spliceWaypoints(newWpIndex, 0, e.latlng);
+				this._hookWaypointEvents(this._markers[newWpIndex], newWpIndex, true);
+			} else {
+				this._dragNewWaypoint(newWpIndex, e.latlng);
+			}
+		},
+
+		_dragNewWaypoint: function(newWpIndex, initialLatLng) {
+			var wp = new L.Routing.Waypoint(initialLatLng),
+				prevWp = this._waypoints[newWpIndex - 1],
+				nextWp = this._waypoints[newWpIndex],
+				marker = this.options.createMarker(newWpIndex, wp, this._waypoints.length + 1),
+				lines = [],
+				mouseMove = L.bind(function(e) {
+					var i;
+					if (marker) {
+						marker.setLatLng(e.latlng);
+					}
+					for (i = 0; i < lines.length; i++) {
+						lines[i].spliceLatLngs(1, 1, e.latlng);
+					}
+				}, this),
+				mouseUp = L.bind(function(e) {
+					var i;
+					if (marker) {
+						this._map.removeLayer(marker);
+					}
+					for (i = 0; i < lines.length; i++) {
+						this._map.removeLayer(lines[i]);
+					}
+					this._map.off('mousemove', mouseMove);
+					this._map.off('mouseup', mouseUp);
+					this.spliceWaypoints(newWpIndex, 0, e.latlng);
+				}, this),
+				i;
+
+			if (marker) {
+				marker.addTo(this._map);
+			}
 
 			for (i = 0; i < this.options.dragStyles.length; i++) {
-				this._newWp.lines.push(L.polyline([
-					this._waypoints[e.afterIndex].latLng,
-					e.latlng,
-					this._waypoints[e.afterIndex + 1].latLng
-				], this.options.dragStyles[i]).addTo(this._map));
+				lines.push(L.polyline([prevWp.latLng, initialLatLng, nextWp.latLng],
+					this.options.dragStyles[i]).addTo(this._map));
 			}
 
-			this._markers.splice(e.afterIndex + 1, 0, this._newWp.marker);
-			this._map.on('mousemove', this._onDragNewWp, this);
-			this._map.on('mouseup', this._onWpRelease, this);
-		},
-
-		_onDragNewWp: function(e) {
-			var i;
-			this._newWp.marker.setLatLng(e.latlng);
-			for (i = 0; i < this._newWp.lines.length; i++) {
-				this._newWp.lines[i].spliceLatLngs(1, 1, e.latlng);
-			}
-		},
-
-		_onWpRelease: function(e) {
-			var i;
-			this._map.off('mouseup', this._onWpRelease, this);
-			this._map.off('mousemove', this._onDragNewWp, this);
-			for (i = 0; i < this._newWp.lines.length; i++) {
-				this._map.removeLayer(this._newWp.lines[i]);
-			}
-			this.spliceWaypoints(this._newWp.afterIndex + 1, 0, e.latlng);
-			delete this._newWp;
+			this._map.on('mousemove', mouseMove);
+			this._map.on('mouseup', mouseUp);
 		},
 
 		_focusGeocoder: function(i) {
