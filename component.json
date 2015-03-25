@@ -14,6 +14,7 @@
         "js/leaflet-routing-machine.min.js",
         "js/lrm-graphhopper.js",
         "js/lrm-mapbox.js",
+        "js/lrm-tomtom.js",
         "css/leaflet-routing-machine.css",
         "css/routing-icon.png",
         "css/leaflet.routing.icons.png",
