@@ -8,9 +8,6 @@
         "url": "http://www.liedman.net",
         "name": "Per Liedman <per@liedman.net>"
     },
-    "require": {
-        "robloach/component-installer": "*"
-    },
     "extra": {
         "component": {
             "scripts": [
