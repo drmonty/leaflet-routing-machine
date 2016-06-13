@@ -1,4 +1,4 @@
-(function(f){if(typeof exports==="object"&&typeof module!=="undefined"){module.exports=f()}else if(typeof define==="function"&&define.amd){define([],f)}else{var g;if(typeof window!=="undefined"){g=window}else if(typeof global!=="undefined"){g=global}else if(typeof self!=="undefined"){g=self}else{g=this}(g.L || (g.L = {})).Routing = f()}})(function(){var define,module,exports;return (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
+!function(e){if("object"==typeof exports&&"undefined"!=typeof module)module.exports=e();else if("function"==typeof define&&define.amd)define([],e);else{var f;"undefined"!=typeof window?f=window:"undefined"!=typeof global?f=global:"undefined"!=typeof self&&(f=self),(f.L||(f.L={})).Routing=e()}}(function(){var define,module,exports;return (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
 function corslite(url, callback, cors) {
     var sent = false;
 
@@ -228,8 +228,14 @@ if (typeof module !== undefined) module.exports = polyline;
 		_open: function() {
 			var rect = this._elem.getBoundingClientRect();
 			if (!this._container.parentElement) {
-				this._container.style.left = (rect.left + window.scrollX) + 'px';
-				this._container.style.top = (rect.bottom + window.scrollY) + 'px';
+				// See notes section under https://developer.mozilla.org/en-US/docs/Web/API/Window/scrollX
+				// This abomination is required to support all flavors of IE
+				var scrollX = (window.pageXOffset !== undefined) ? window.pageXOffset
+					: (document.documentElement || document.body.parentNode || document.body).scrollLeft;
+				var scrollY = (window.pageYOffset !== undefined) ? window.pageYOffset
+					: (document.documentElement || document.body.parentNode || document.body).scrollTop;
+				this._container.style.left = (rect.left + scrollX) + 'px';
+				this._container.style.top = (rect.bottom + scrollY) + 'px';
 				this._container.style.width = (rect.right - rect.left) + 'px';
 				document.body.appendChild(this._container);
 			}
@@ -412,8 +418,10 @@ if (typeof module !== undefined) module.exports = polyline;
 			routeWhileDragging: false,
 			routeDragInterval: 500,
 			waypointMode: 'connect',
-			useZoomParameter: false,
-			showAlternatives: false
+			showAlternatives: false,
+			defaultErrorHandler: function(e) {
+				console.error('Routing error:', e.error);
+			}
 		},
 
 		initialize: function(options) {
@@ -426,6 +434,9 @@ if (typeof module !== undefined) module.exports = polyline;
 			L.Routing.Itinerary.prototype.initialize.call(this, options);
 
 			this.on('routeselected', this._routeSelected, this);
+			if (this.options.defaultErrorHandler) {
+				this.on('routingerror', this.options.defaultErrorHandler);
+			}
 			this._plan.on('waypointschanged', this._onWaypointsChanged, this);
 			if (options.routeWhileDragging) {
 				this._setupRouteDragging();
@@ -442,13 +453,31 @@ if (typeof module !== undefined) module.exports = polyline;
 			this._map = map;
 			this._map.addLayer(this._plan);
 
-			if (this.options.useZoomParameter) {
-				this._map.on('zoomend', function() {
+			this._map.on('zoomend', function() {
+				if (!this._selectedRoute ||
+					!this._router.requiresMoreDetail) {
+					return;
+				}
+
+				var map = this._map;
+				if (this._router.requiresMoreDetail(this._selectedRoute,
+						map.getZoom(), map.getBounds())) {
 					this.route({
-						callback: L.bind(this._updateLineCallback, this)
+						callback: L.bind(function(err, routes) {
+							var i;
+							if (!err) {
+								for (i = 0; i < routes.length; i++) {
+									this._routes[i].properties = routes[i].properties;
+								}
+								this._updateLineCallback(err, routes);
+							}
+
+						}, this),
+						simplifyGeometry: false,
+						geometryOnly: true
 					});
-				}, this);
-			}
+				}
+			}, this);
 
 			if (this._plan.options.geocoder) {
 				container.insertBefore(this._plan.createGeocoders(), container.firstChild);
@@ -488,7 +517,7 @@ if (typeof module !== undefined) module.exports = polyline;
 		},
 
 		_routeSelected: function(e) {
-			var route = e.route,
+			var route = this._selectedRoute = e.route,
 				alternatives = this.options.showAlternatives && e.alternatives,
 				fitMode = this.options.fitSelectedRoutes,
 				fitBounds =
@@ -846,6 +875,9 @@ if (typeof module !== undefined) module.exports = polyline;
 		},
 
 		formatTime: function(t /* Number (seconds) */) {
+			// More than 30 seconds precision looks ridiculous
+			t = Math.round(t / 30) * 30;
+
 			if (t > 86400) {
 				return Math.round(t / 3600) + ' h';
 			} else if (t > 3600) {
@@ -2022,7 +2054,7 @@ if (typeof module !== undefined) module.exports = polyline;
 	 */
 	L.Routing.OSRMv1 = L.Class.extend({
 		options: {
-			serviceUrl: 'http://router.project-osrm.org/route/v1',
+			serviceUrl: 'https://router.project-osrm.org/route/v1',
 			profile: 'driving',
 			timeout: 30 * 1000,
 			routingOptions: {
@@ -2047,7 +2079,8 @@ if (typeof module !== undefined) module.exports = polyline;
 				wp,
 				i;
 
-			url = this.buildRouteUrl(waypoints, L.extend({}, this.options.routingOptions, options));
+			options = L.extend({}, this.options.routingOptions, options);
+			url = this.buildRouteUrl(waypoints, options);
 
 			timer = setTimeout(function() {
 				timedOut = true;
@@ -2100,6 +2133,22 @@ if (typeof module !== undefined) module.exports = polyline;
 			return this;
 		},
 
+		requiresMoreDetail: function(route, zoom, bounds) {
+			if (!route.properties.isSimplified) {
+				return false;
+			}
+
+			var waypoints = route.inputWaypoints,
+				i;
+			for (i = 0; i < waypoints.length; ++i) {
+				if (!bounds.contains(waypoints[i].latLng)) {
+					return true;
+				}
+			}
+
+			return false;
+		},
+
 		_routeDone: function(response, inputWaypoints, options, callback, context) {
 			var alts = [],
 			    actualWaypoints,
@@ -2117,9 +2166,10 @@ if (typeof module !== undefined) module.exports = polyline;
 			actualWaypoints = this._toWaypoints(inputWaypoints, response.waypoints);
 
 			for (i = 0; i < response.routes.length; i++) {
-				route = this._convertRoute(response.routes[i], options.geometryOnly);
+				route = this._convertRoute(response.routes[i]);
 				route.inputWaypoints = inputWaypoints;
 				route.waypoints = actualWaypoints;
+				route.properties = {isSimplified: !options || !options.geometryOnly || options.simplifyGeometry};
 				alts.push(route);
 			}
 
@@ -2128,18 +2178,20 @@ if (typeof module !== undefined) module.exports = polyline;
 			callback.call(context, null, alts);
 		},
 
-		_convertRoute: function(responseRoute, geometryOnly) {
+		_convertRoute: function(responseRoute) {
 			var result = {
-					name: '', // TODO
+					name: '',
+					coordinates: [],
+					instructions: [],
 					summary: {
 						totalDistance: responseRoute.distance,
 						totalTime: responseRoute.duration
 					}
 				},
-				coordinates = [],
-				instructions = [],
+				legNames = [],
 				index = 0,
 				legCount = responseRoute.legs.length,
+				hasSteps = responseRoute.legs[0].steps.length > 0,
 				i,
 				j,
 				leg,
@@ -2147,27 +2199,24 @@ if (typeof module !== undefined) module.exports = polyline;
 				geometry,
 				type;
 
-			if (geometryOnly) {
-				result.coordinates = this._decodePolyline(responseRoute.geometry);
-				return result;
-			}
-
 			for (i = 0; i < legCount; i++) {
 				leg = responseRoute.legs[i];
+				legNames.push(leg.summary);
 				for (j = 0; j < leg.steps.length; j++) {
 					step = leg.steps[j];
 					geometry = this._decodePolyline(step.geometry);
-					coordinates.push(geometry);
+					result.coordinates.push.apply(result.coordinates, geometry);
 					type = this._maneuverToInstructionType(step.maneuver, i === legCount - 1);
 					if (type) {
-						instructions.push({
+						result.instructions.push({
 							type: type,
 							distance: step.distance,
 							time: step.duration,
 							road: step.name,
 							direction: this._bearingToDirection(step.maneuver.bearing_after),
 							exit: step.maneuver.exit,
-							index: index
+							index: index,
+							mode: step.mode
 						});
 					}
 
@@ -2175,8 +2224,10 @@ if (typeof module !== undefined) module.exports = polyline;
 				}
 			}
 
-			result.coordinates = Array.prototype.concat.apply([], coordinates);
-			result.instructions = instructions;
+			result.name = legNames.join(', ');
+			if (!hasSteps) {
+				result.coordinates = this._decodePolyline(responseRoute.geometry);
+			}
 
 			return result;
 		},
@@ -2188,8 +2239,22 @@ if (typeof module !== undefined) module.exports = polyline;
 
 		_maneuverToInstructionType: function(maneuver, lastLeg) {
 			switch (maneuver.type) {
-			case 'turn':
-			case 'end of road':
+			case 'new name':
+				return 'Continue';
+			case 'arrive':
+				return lastLeg ? 'DestinationReached' : 'WaypointReached';
+			case 'roundabout':
+			case 'rotary':
+				return 'Roundabout';
+			// These are all reduced to the same instruction in the current model
+			//case 'turn':
+			//case 'end of road':
+			//case 'merge':
+			//case 'on ramp': // new in v5.1
+			//case 'off ramp': // new in v5.1
+			//case 'ramp': // deprecated in v5.1
+			//case 'fork':
+			default:
 				switch (maneuver.modifier) {
 				case 'straight':
 					return 'Straight';
@@ -2210,18 +2275,6 @@ if (typeof module !== undefined) module.exports = polyline;
 				default:
 					return null;
 				}
-				break;
-			case 'new name':
-			case 'merge':
-			case 'ramp':
-			case 'fork':
-				return 'Continue';
-			case 'arrive':
-				return lastLeg ? 'DestinationReached' : 'WaypointReached';
-			case 'roundabout':
-			case 'rotary':
-				return 'Roundabout';
-			default:
 				return null;
 			}
 		},
@@ -2241,28 +2294,12 @@ if (typeof module !== undefined) module.exports = polyline;
 			var wps = [],
 			    i;
 			for (i = 0; i < vias.length; i++) {
-				wps.push(L.Routing.waypoint(L.latLng(vias[i]),
+				wps.push(L.Routing.waypoint(L.latLng(vias[i].location),
 				                            inputWaypoints[i].name,
-				                            inputWaypoints[i].options));
+											inputWaypoints[i].options));
 			}
 
 			return wps;
-		},
-
-		_createName: function(nameParts) {
-			var name = '',
-				i;
-
-			for (i = 0; i < nameParts.length; i++) {
-				if (nameParts[i]) {
-					if (name) {
-						name += ', ';
-					}
-					name += nameParts[i].charAt(0).toUpperCase() + nameParts[i].slice(1);
-				}
-			}
-
-			return name;
 		},
 
 		buildRouteUrl: function(waypoints, options) {
@@ -2271,24 +2308,24 @@ if (typeof module !== undefined) module.exports = polyline;
 				wp,
 				latLng,
 			    computeInstructions,
-			    computeAlternative;
+			    computeAlternative = true;
 
 			for (var i = 0; i < waypoints.length; i++) {
 				wp = waypoints[i];
 				latLng = wp.latLng;
 				locs.push(latLng.lng + ',' + latLng.lat);
-				hints.push(this._hints[this._locationKey(latLng)] || '');
+				hints.push(this._hints.locations[this._locationKey(latLng)] || '');
 			}
 
-			computeAlternative = computeInstructions =
+			computeInstructions =
 				!(options && options.geometryOnly);
 
 			return this.options.serviceUrl + '/' + this.options.profile + '/' +
 				locs.join(';') + '?' +
-				(options.z ? 'z=' + options.z + '&' : (options.geometryOnly ? 'overview=full&' : '')) +
-				//'hints=' + hints.join(';') + '&' +
-				'alternatives=' + computeAlternative.toString() + '&' +
-				'steps=' + computeInstructions.toString() +
+				(options.geometryOnly ? (options.simplifyGeometry ? '' : 'overview=full') : 'overview=false') +
+				'&alternatives=' + computeAlternative.toString() +
+				'&steps=' + computeInstructions.toString() +
+				'&hints=' + hints.join(';') +
 				(options.allowUTurns ? '&continue_straight=' + !options.allowUTurns : '');
 		},
 
@@ -2306,44 +2343,10 @@ if (typeof module !== undefined) module.exports = polyline;
 				this._hints.locations[this._locationKey(loc)] = actualWaypoints[i].hint;
 			}
 		},
-
-		_convertSummary: function(osrmSummary) {
-			return {
-				totalDistance: osrmSummary.total_distance,
-				totalTime: osrmSummary.total_time
-			};
-		},
-
-		_convertInstructions: function(osrmInstructions) {
-			var result = [],
-			    i,
-			    instr,
-			    type,
-			    driveDir;
-
-			for (i = 0; i < osrmInstructions.length; i++) {
-				instr = osrmInstructions[i];
-				type = this._drivingDirectionType(instr[0]);
-				driveDir = instr[0].split('-');
-				if (type) {
-					result.push({
-						type: type,
-						distance: instr[2],
-						time: instr[4],
-						road: instr[1],
-						direction: instr[6],
-						exit: driveDir.length > 1 ? driveDir[1] : undefined,
-						index: instr[3]
-					});
-				}
-			}
-
-			return result;
-		},
 	});
 
 	L.Routing.osrmv1 = function(options) {
-		return new L.Routing.OSRM(options);
+		return new L.Routing.OSRMv1(options);
 	};
 
 	module.exports = L.Routing;
