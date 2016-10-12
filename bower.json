@@ -2,7 +2,7 @@
     "name": "drmonty-leaflet-routing-machine",
     "description": "Routing for Leaflet",
     "homepage": "http://github.com/perliedman/leaflet-routing-machine",
-    "version": "3.2.0",
+    "version": "3.2.1",
     "authors": [
         "Per Liedman <per@liedman.net>"
     ],
