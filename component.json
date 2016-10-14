@@ -2,7 +2,7 @@
     "name": "drmonty-leaflet-routing-machine",
     "repo": "drmonty/leaflet-routing-machine",
     "description": "Routing for Leaflet",
-    "version": "3.2.3",
+    "version": "3.2.4",
     "homepage": "http://github.com/perliedman/leaflet-routing-machine",
     "license": "MIT",
     "main": "js/leaflet-routing-machine.js",
