@@ -98,7 +98,7 @@ if (typeof module !== 'undefined') module.exports = corslite;
 (function() {
     'use strict';
 
-    var L = (typeof window !== "undefined" ? window.L : typeof global !== "undefined" ? global.L : null);
+    var L = (typeof window !== "undefined" ? window['L'] : typeof global !== "undefined" ? global['L'] : null);
     var corslite = require('corslite');
 
     L.Routing = L.Routing || {};
@@ -329,7 +329,7 @@ if (typeof module !== 'undefined') module.exports = corslite;
                 idx;
 
             wpIndices.push(0);
-            wps.push(new L.Routing.Waypoint(coordinates[0], waypoints[0].name));
+            wps.push({ latLng: coordinates[0], name: waypoints[0].name });
 
             for (i = 0; i < instructions.length; i++) {
                 if (instructions[i].type === "WaypointReached") {
